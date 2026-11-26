@@ -72,16 +72,16 @@ export async function checkNanoAvailability(): Promise<NanoAvailability> {
 }
 
 let cachedModel: GenerativeModel | undefined;
+let cachedSearchModel: GenerativeModel | undefined;
 
-function getModel(): GenerativeModel {
-  if (cachedModel) return cachedModel;
+function buildModel(withSearch: boolean): GenerativeModel {
   if (!firebaseApp) {
     throw new Error(
       "Firebase is not configured yet. Copy .env.example to .env and fill in your Firebase project config, then reload.",
     );
   }
   const ai = getAI(firebaseApp, { backend: new GoogleAIBackend() });
-  cachedModel = getGenerativeModel(ai, {
+  return getGenerativeModel(ai, {
     mode: InferenceMode.PREFER_ON_DEVICE,
     onDeviceParams: {
       createOptions: {
@@ -99,8 +99,22 @@ function getModel(): GenerativeModel {
       model: CLOUD_MODEL,
       systemInstruction: PB_SYSTEM_CONTEXT,
       generationConfig: { maxOutputTokens: 512, temperature: 0.7 },
+      // LIVE SEARCH: the cloud lane carries Google Search grounding, so a
+      // question that needs today's facts (prices, news, the live web) is
+      // answered from what PB actually found, and the response's grounding
+      // metadata names the sources. The on-device lane has no web access —
+      // Nano answers from the model itself, which the badge states plainly.
+      ...(withSearch ? { tools: [{ googleSearch: {} }] } : {}),
     },
   });
+}
+
+function getModel(withSearch: boolean): GenerativeModel {
+  if (withSearch) {
+    cachedSearchModel ??= buildModel(true);
+    return cachedSearchModel;
+  }
+  cachedModel ??= buildModel(false);
   return cachedModel;
 }
 
@@ -113,28 +127,27 @@ export interface AskCallbacks {
   onLaneKnown?: (lane: Lane) => void;
 }
 
+export interface SourceLink {
+  title: string;
+  uri: string;
+}
+
 export interface AskResult {
   text: string;
   lane: Lane;
   /** True when the lane came from the availability check, not the SDK. */
   laneInferred: boolean;
   availability: NanoAvailability;
+  /** Web sources the cloud lane actually checked (search grounding). */
+  sources: SourceLink[];
 }
 
-export async function askPB(
+async function consume(
+  model: GenerativeModel,
   question: string,
   callbacks: AskCallbacks,
+  availability: NanoAvailability,
 ): Promise<AskResult> {
-  if (!firebaseConfigured) {
-    throw new Error(
-      "Firebase is not configured yet. Copy .env.example to .env and fill in your Firebase project config, then reload.",
-    );
-  }
-  const model = getModel();
-
-  // Pre-call availability: drives the "checking on-device…" UI and is the
-  // honest fallback signal if a response ever arrives without a source.
-  const availability = await checkNanoAvailability();
 
   // initializeDeviceModel() must be called after/on a user interaction and
   // before the first prompt request. askPB() runs from the Ask button's
@@ -179,5 +192,57 @@ export async function askPB(
     callbacks.onLaneKnown?.(lane);
   }
 
-  return { text, lane, laneInferred, availability };
+  // Sources the cloud lane checked, from the response's grounding metadata.
+  // Deduped, capped at 3 — enough to show the work without clutter.
+  const sources: SourceLink[] = [];
+  try {
+    const chunks =
+      finalResponse.candidates?.[0]?.groundingMetadata?.groundingChunks ?? [];
+    const seen = new Set<string>();
+    for (const chunk of chunks) {
+      const uri = chunk.web?.uri;
+      if (!uri || seen.has(uri)) continue;
+      seen.add(uri);
+      sources.push({ title: chunk.web?.title || uri, uri });
+      if (sources.length >= 3) break;
+    }
+  } catch {
+    // Grounding metadata is a bonus — never a reason to fail an answer.
+  }
+
+  return { text, lane, laneInferred, availability, sources };
+}
+
+export async function askPB(
+  question: string,
+  callbacks: AskCallbacks,
+): Promise<AskResult> {
+  if (!firebaseConfigured) {
+    throw new Error(
+      "Firebase is not configured yet. Copy .env.example to .env and fill in your Firebase project config, then reload.",
+    );
+  }
+
+  // Pre-call availability: drives the "checking on-device…" UI and is the
+  // honest fallback signal if a response ever arrives without a source.
+  const availability = await checkNanoAvailability();
+
+  // Search first: the grounded model is the default. If the search tool
+  // ever fails the request before a single word streams, fall back to the
+  // plain model — an answer from knowledge beats no answer at all. A
+  // failure after text has streamed is surfaced as-is.
+  let emitted = false;
+  const tracking: AskCallbacks = {
+    ...callbacks,
+    onChunk: (textSoFar) => {
+      emitted = true;
+      callbacks.onChunk(textSoFar);
+    },
+  };
+  try {
+    return await consume(getModel(true), question, tracking, availability);
+  } catch (err) {
+    if (emitted) throw err;
+    return await consume(getModel(false), question, callbacks, availability);
+  }
 }

@@ -15,6 +15,7 @@ const badge = $<HTMLSpanElement>("#lane-badge");
 const answerState = $<HTMLParagraphElement>("#answer-state");
 const answerText = $<HTMLParagraphElement>("#answer-text");
 const answerMeta = $<HTMLParagraphElement>("#answer-meta");
+const answerSources = $<HTMLParagraphElement>("#answer-sources");
 
 if (!firebaseConfigured) {
   setupBanner.hidden = false;
@@ -65,6 +66,7 @@ async function runAsk(question: string) {
   answerCard.hidden = false;
   answerText.textContent = "";
   answerMeta.textContent = "";
+  answerSources.textContent = "";
   setBadge("checking");
   answerState.textContent = "Checking on-device…";
 
@@ -91,6 +93,18 @@ async function runAsk(question: string) {
     if (result.laneInferred) {
       answerMeta.textContent +=
         " (The SDK didn't report a lane for this response, so the badge is inferred from the pre-call availability check.)";
+    }
+    if (result.sources.length) {
+      answerSources.append("PB checked: ");
+      result.sources.forEach((source, i) => {
+        if (i) answerSources.append(" · ");
+        const link = document.createElement("a");
+        link.href = source.uri;
+        link.target = "_blank";
+        link.rel = "noreferrer";
+        link.textContent = source.title;
+        answerSources.append(link);
+      });
     }
   } catch (err) {
     badge.className = "badge badge-error";

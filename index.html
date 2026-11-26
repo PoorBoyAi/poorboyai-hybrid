@@ -30,7 +30,9 @@
             Now he answers on the web too. In Chrome on desktop, Gemini Nano
             generates the answer right on your own machine. Everywhere else,
             the same question rides to cloud Gemini. The badge on every answer
-            tells you which lane served it.
+            tells you which lane served it. And when a question needs today's
+            facts — a price, the news, anything live — cloud PB searches the
+            web first and lists the sources he checked under the answer.
           </p>
           <p id="nano-status" class="nano-status" role="status">
             Checking this device for Gemini Nano…
@@ -66,6 +68,9 @@
             <button class="chip" type="button" data-q="What does the PB Plan cost?">
               What does the PB Plan cost?
             </button>
+            <button class="chip" type="button" data-q="What is the price of ETH right now?">
+              What is the price of ETH right now?
+            </button>
             <button class="chip" type="button" data-q="Why is the sky blue?">
               Why is the sky blue?
             </button>
@@ -88,6 +93,7 @@
           <p id="answer-state" class="answer-state"></p>
           <p id="answer-text" class="answer-text"></p>
           <p id="answer-meta" class="answer-meta"></p>
+          <p id="answer-sources" class="answer-sources"></p>
         </section>
 
         <section class="how" aria-label="How this works">
@@ -107,7 +113,9 @@
               <p>
                 No Nano? No problem. The same SDK call falls back to a
                 cloud-hosted Gemini model through the Gemini Developer API —
-                same PB, same knowledge, same voice.
+                same PB, same knowledge, same voice. The cloud lane also
+                carries live Google Search grounding, so questions about
+                today's world are answered from sources PB actually checked.
               </p>
             </article>
             <article class="how-card">

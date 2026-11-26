@@ -281,6 +281,20 @@ main {
   color: var(--text-dim);
 }
 
+.answer-sources {
+  margin: 6px 0 0;
+  font-size: 13.5px;
+  color: var(--text-dim);
+}
+
+.answer-sources:empty {
+  display: none;
+}
+
+.answer-sources a {
+  color: var(--accent, #6ea8fe);
+}
+
 /* How it works */
 .how {
   margin-top: 44px;
