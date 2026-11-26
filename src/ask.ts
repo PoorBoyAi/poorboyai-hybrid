@@ -174,18 +174,25 @@ async function consume(
   question: string,
   callbacks: AskCallbacks,
   availability: NanoAvailability,
+  initDevice: boolean,
 ): Promise<AskResult> {
 
   // initializeDeviceModel() must be called after/on a user interaction and
-  // before the first prompt request. askPB() runs from the Ask button's
-  // submit handler, so we are inside that gesture chain. A failure here
-  // (e.g. no Prompt API) must never block the cloud lane.
-  try {
-    await model.initializeDeviceModel((fraction) =>
-      callbacks.onDownloadProgress?.(fraction),
-    );
-  } catch {
-    // On-device init unavailable — PREFER_ON_DEVICE will use the cloud.
+  // before the first prompt request — but ONLY on the hybrid model.
+  // askPB() runs from the Ask button's submit handler, so we are inside
+  // that gesture chain. Calling it on the plain cloud search model can
+  // stall the ask indefinitely (observed live: the page sat on
+  // "Checking on-device…" for minutes) — the search model is cloud-only
+  // by construction and skips init entirely. A failure here (e.g. no
+  // Prompt API) must never block the cloud lane either.
+  if (initDevice) {
+    try {
+      await model.initializeDeviceModel((fraction) =>
+        callbacks.onDownloadProgress?.(fraction),
+      );
+    } catch {
+      // On-device init unavailable — PREFER_ON_DEVICE will use the cloud.
+    }
   }
 
   const { stream, response } = await model.generateContentStream(question);
@@ -263,7 +270,13 @@ export async function askPB(
   //   model — an answer from knowledge beats no answer at all. A failure
   //   after text has streamed is surfaced as-is.
   if (availability === "available") {
-    return await consume(getHybridModel(), question, callbacks, availability);
+    return await consume(
+      getHybridModel(),
+      question,
+      callbacks,
+      availability,
+      true,
+    );
   }
   let emitted = false;
   const tracking: AskCallbacks = {
@@ -274,9 +287,15 @@ export async function askPB(
     },
   };
   try {
-    return await consume(getSearchModel(), question, tracking, availability);
+    return await consume(getSearchModel(), question, tracking, availability, false);
   } catch (err) {
     if (emitted) throw err;
-    return await consume(getHybridModel(), question, callbacks, availability);
+    return await consume(
+      getHybridModel(),
+      question,
+      callbacks,
+      availability,
+      true,
+    );
   }
 }
