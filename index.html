@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Ask PB — PoorBoyAI's AI companion, now answering on the web. On your own device with Gemini Nano when Chrome supports it, from the cloud everywhere else."
+    />
+    <title>Ask PB — PoorBoyAI on the web, answered on your device</title>
+  </head>
+  <body>
+    <div id="app">
+      <header class="site-header">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">PB</span>
+          <span class="brand-name">PoorBoyAI</span>
+        </div>
+        <span class="header-tag">Ask PB · Web</span>
+      </header>
+
+      <main>
+        <section class="hero">
+          <h1>Ask PB. Answered on <em>your</em> device.</h1>
+          <p class="hero-sub">
+            PB is PoorBoyAI's AI companion — he lives in our Telegram community.
+            Now he answers on the web too. In Chrome on desktop, Gemini Nano
+            generates the answer right on your own machine. Everywhere else,
+            the same question rides to cloud Gemini. The badge on every answer
+            tells you which lane served it.
+          </p>
+          <p id="nano-status" class="nano-status" role="status">
+            Checking this device for Gemini Nano…
+          </p>
+        </section>
+
+        <section class="ask-card" aria-label="Ask PB a question">
+          <form id="ask-form">
+            <label class="ask-label" for="question">Ask PB anything</label>
+            <div class="ask-row">
+              <input
+                id="question"
+                name="question"
+                type="text"
+                placeholder="What is PoorBoyAI?"
+                autocomplete="off"
+                maxlength="300"
+                required
+              />
+              <button id="ask-btn" type="submit">Ask PB</button>
+            </div>
+          </form>
+          <div class="chips" aria-label="Example questions">
+            <button class="chip" type="button" data-q="What is PoorBoyAI?">
+              What is PoorBoyAI?
+            </button>
+            <button class="chip" type="button" data-q="How does the Turkey Run contest work?">
+              How does Turkey Run work?
+            </button>
+            <button class="chip" type="button" data-q="What is Streets of Crypto?">
+              What is Streets of Crypto?
+            </button>
+            <button class="chip" type="button" data-q="What does the PB Plan cost?">
+              What does the PB Plan cost?
+            </button>
+          </div>
+          <p id="setup-banner" class="setup-banner" hidden>
+            This demo isn't wired to a Firebase project yet. Copy
+            <code>.env.example</code> to <code>.env</code>, fill in the project
+            config, and reload — see the README for the setup steps.
+          </p>
+        </section>
+
+        <section id="answer-card" class="answer-card" hidden aria-live="polite">
+          <div class="answer-head">
+            <span class="answer-who">PB</span>
+            <span id="lane-badge" class="badge badge-checking">Checking…</span>
+          </div>
+          <p id="answer-state" class="answer-state"></p>
+          <p id="answer-text" class="answer-text"></p>
+          <p id="answer-meta" class="answer-meta"></p>
+        </section>
+
+        <section class="how" aria-label="How this works">
+          <h2>How this works</h2>
+          <div class="how-grid">
+            <article class="how-card">
+              <h3>On-device · Gemini Nano</h3>
+              <p>
+                Chrome 139+ on desktop ships Gemini Nano through the Prompt
+                API. Firebase AI Logic's hybrid mode prefers it: your question
+                never leaves your machine, answers cost nothing, and they work
+                offline.
+              </p>
+            </article>
+            <article class="how-card">
+              <h3>Cloud · Gemini</h3>
+              <p>
+                No Nano? No problem. The same SDK call falls back to a
+                cloud-hosted Gemini model through the Gemini Developer API —
+                same PB, same facts, same voice.
+              </p>
+            </article>
+            <article class="how-card">
+              <h3>Honest badge</h3>
+              <p>
+                The badge isn't decoration. Firebase AI Logic reports
+                <code>inferenceSource</code> on every response, and the badge
+                shows exactly the lane the SDK says served your answer.
+              </p>
+            </article>
+          </div>
+        </section>
+      </main>
+
+      <footer class="site-footer">
+        <p>
+          Built in-house by PoorBoyAI for Google's #BuildHybridAI hackathon ·
+          <a href="https://poorboyai.com" target="_blank" rel="noreferrer">poorboyai.com</a>
+          · <a href="https://t.me/poorboyai" target="_blank" rel="noreferrer">Telegram community</a>
+        </p>
+      </footer>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
