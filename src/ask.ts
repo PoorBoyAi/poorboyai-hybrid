@@ -11,6 +11,12 @@
  * the badge is set from that value. Only if a response arrives without it do
  * we fall back to the pre-call LanguageModel.availability() result — and then
  * the result is flagged `laneInferred` so the UI can say so.
+ *
+ * LIVE SEARCH: when Gemini Nano is not ready on the device, the cloud
+ * serves the answer either way — so those questions go to a dedicated
+ * cloud model carrying Google Search grounding (buildSearchModel), and
+ * the sources it checked are returned in AskResult.sources for the UI
+ * to list. When Nano IS ready, the hybrid model serves on-device.
  */
 import {
   getAI,
@@ -74,14 +80,22 @@ export async function checkNanoAvailability(): Promise<NanoAvailability> {
 let cachedModel: GenerativeModel | undefined;
 let cachedSearchModel: GenerativeModel | undefined;
 
-function buildModel(withSearch: boolean): GenerativeModel {
+function aiBackend() {
   if (!firebaseApp) {
     throw new Error(
       "Firebase is not configured yet. Copy .env.example to .env and fill in your Firebase project config, then reload.",
     );
   }
-  const ai = getAI(firebaseApp, { backend: new GoogleAIBackend() });
-  return getGenerativeModel(ai, {
+  return getAI(firebaseApp, { backend: new GoogleAIBackend() });
+}
+
+/**
+ * The hybrid model: Gemini Nano on-device when it's ready, cloud Gemini
+ * otherwise (InferenceMode.PREFER_ON_DEVICE). This is the hackathon's
+ * core lane — private, offline-capable answers on the visitor's machine.
+ */
+function buildHybridModel(): GenerativeModel {
+  return getGenerativeModel(aiBackend(), {
     mode: InferenceMode.PREFER_ON_DEVICE,
     onDeviceParams: {
       createOptions: {
@@ -99,23 +113,36 @@ function buildModel(withSearch: boolean): GenerativeModel {
       model: CLOUD_MODEL,
       systemInstruction: PB_SYSTEM_CONTEXT,
       generationConfig: { maxOutputTokens: 512, temperature: 0.7 },
-      // LIVE SEARCH: the cloud lane carries Google Search grounding, so a
-      // question that needs today's facts (prices, news, the live web) is
-      // answered from what PB actually found, and the response's grounding
-      // metadata names the sources. The on-device lane has no web access —
-      // Nano answers from the model itself, which the badge states plainly.
-      ...(withSearch ? { tools: [{ googleSearch: {} }] } : {}),
     },
   });
 }
 
-function getModel(withSearch: boolean): GenerativeModel {
-  if (withSearch) {
-    cachedSearchModel ??= buildModel(true);
-    return cachedSearchModel;
-  }
-  cachedModel ??= buildModel(false);
+/**
+ * The search model: a plain cloud Gemini model carrying Google Search
+ * grounding. Used whenever Gemini Nano is NOT ready on this device —
+ * in that case the cloud serves the answer either way, so it may as
+ * well serve it with live web access, and the response's grounding
+ * metadata names the sources PB checked. (Tools placed inside the
+ * hybrid model's inCloudParams never reached the model in testing —
+ * a dedicated cloud model is the shape that actually grounds.)
+ */
+function buildSearchModel(): GenerativeModel {
+  return getGenerativeModel(aiBackend(), {
+    model: CLOUD_MODEL,
+    systemInstruction: PB_SYSTEM_CONTEXT,
+    generationConfig: { maxOutputTokens: 512, temperature: 0.7 },
+    tools: [{ googleSearch: {} }],
+  });
+}
+
+function getHybridModel(): GenerativeModel {
+  cachedModel ??= buildHybridModel();
   return cachedModel;
+}
+
+function getSearchModel(): GenerativeModel {
+  cachedSearchModel ??= buildSearchModel();
+  return cachedSearchModel;
 }
 
 export interface AskCallbacks {
@@ -227,10 +254,17 @@ export async function askPB(
   // honest fallback signal if a response ever arrives without a source.
   const availability = await checkNanoAvailability();
 
-  // Search first: the grounded model is the default. If the search tool
-  // ever fails the request before a single word streams, fall back to the
-  // plain model — an answer from knowledge beats no answer at all. A
-  // failure after text has streamed is surfaced as-is.
+  // Lane routing:
+  // - Nano ready on this device → the hybrid model (on-device serves,
+  //   private and offline-capable — the point of the hybrid build).
+  // - Nano not ready → the cloud serves either way, so use the grounded
+  //   search model and let PB look things up live. If the search request
+  //   ever fails before a single word streams, fall back to the hybrid
+  //   model — an answer from knowledge beats no answer at all. A failure
+  //   after text has streamed is surfaced as-is.
+  if (availability === "available") {
+    return await consume(getHybridModel(), question, callbacks, availability);
+  }
   let emitted = false;
   const tracking: AskCallbacks = {
     ...callbacks,
@@ -240,9 +274,9 @@ export async function askPB(
     },
   };
   try {
-    return await consume(getModel(true), question, tracking, availability);
+    return await consume(getSearchModel(), question, tracking, availability);
   } catch (err) {
     if (emitted) throw err;
-    return await consume(getModel(false), question, callbacks, availability);
+    return await consume(getHybridModel(), question, callbacks, availability);
   }
 }
