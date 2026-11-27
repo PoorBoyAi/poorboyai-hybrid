@@ -172,6 +172,17 @@ function needsLiveSearch(question: string): boolean {
   if (/^[\d\s%+\-*/x×÷=().,]+$/i.test(q.replace(/^what is/i, ""))) {
     return false;
   }
+  // Questions about PoorBoyAI itself are answered from the baked-in
+  // fact sheet (src/facts.ts) — a web search only adds noise (an
+  // unrelated MSN page once showed up as the "source" for
+  // "What is PoorBoyAI?"). Price/market questions about the project
+  // or its tokens still search live.
+  if (
+    /\bpoor\s?boy\s?ai\b/i.test(q) &&
+    !/\b(price|cost|worth|value|chart|market\s?cap|trading|buy|sell)\b/i.test(q)
+  ) {
+    return false;
+  }
   return true;
 }
 
