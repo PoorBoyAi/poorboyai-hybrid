@@ -112,7 +112,7 @@ function buildHybridModel(): GenerativeModel {
     inCloudParams: {
       model: CLOUD_MODEL,
       systemInstruction: PB_SYSTEM_CONTEXT,
-      generationConfig: { maxOutputTokens: 512, temperature: 0.7 },
+      generationConfig: { maxOutputTokens: 1024, temperature: 0.7 },
     },
   });
 }
@@ -130,7 +130,7 @@ function buildCloudModel(): GenerativeModel {
   return getGenerativeModel(aiBackend(), {
     model: CLOUD_MODEL,
     systemInstruction: PB_SYSTEM_CONTEXT,
-    generationConfig: { maxOutputTokens: 512, temperature: 0.7 },
+    generationConfig: { maxOutputTokens: 1024, temperature: 0.7 },
   });
 }
 
