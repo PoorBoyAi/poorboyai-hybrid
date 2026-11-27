@@ -118,20 +118,19 @@ function buildHybridModel(): GenerativeModel {
 }
 
 /**
- * The search model: a plain cloud Gemini model carrying Google Search
- * grounding. Used whenever Gemini Nano is NOT ready on this device —
- * in that case the cloud serves the answer either way, so it may as
- * well serve it with live web access, and the response's grounding
- * metadata names the sources PB checked. (Tools placed inside the
- * hybrid model's inCloudParams never reached the model in testing —
- * a dedicated cloud model is the shape that actually grounds.)
+ * The plain cloud model. Used whenever Gemini Nano is NOT ready on
+ * this device. It carries NO tools on purpose: on this AI Logic
+ * backend, the SDK's googleSearch tool never grounded reliably
+ * (ignored on the lite model, MALFORMED_FUNCTION_CALL on the full
+ * model). Live web access is PB's own job instead — see
+ * fetchLiveResults() below: PB searches first, answers from what he
+ * finds, and lists the pages he actually checked.
  */
-function buildSearchModel(): GenerativeModel {
+function buildCloudModel(): GenerativeModel {
   return getGenerativeModel(aiBackend(), {
     model: CLOUD_MODEL,
     systemInstruction: PB_SYSTEM_CONTEXT,
     generationConfig: { maxOutputTokens: 512, temperature: 0.7 },
-    tools: [{ googleSearch: {} }],
   });
 }
 
@@ -140,9 +139,74 @@ function getHybridModel(): GenerativeModel {
   return cachedModel;
 }
 
-function getSearchModel(): GenerativeModel {
-  cachedSearchModel ??= buildSearchModel();
+function getCloudModel(): GenerativeModel {
+  cachedSearchModel ??= buildCloudModel();
   return cachedSearchModel;
+}
+
+/* ------------------------------------------------------------------ */
+/* PB's own live search — "memory for speed, search for truth".        */
+/*                                                                     */
+/* Before answering a factual question, PB fetches live results from */
+/* PoorBoyAI's own search proxy (a tiny in-house worker), feeds the  */
+/* snippets to whichever lane serves the answer as context, and     */
+/* reports the fetched pages as the answer's sources. Creative and  */
+/* pure-math prompts skip the fetch. Any failure fails OPEN: the    */
+/* question is answered without live context rather than not at all. */
+/* ------------------------------------------------------------------ */
+
+const SEARCH_ENDPOINT = "https://pb-ask-search.dewayne-aatm.workers.dev/";
+
+interface LiveResult {
+  title: string;
+  url: string;
+  snippet: string;
+}
+
+function needsLiveSearch(question: string): boolean {
+  const q = question.trim();
+  if (/^(write|compose|make up|tell me a joke|tell me a story)\b/i.test(q)) {
+    return false;
+  }
+  // Pure arithmetic ("what is 17 x 24", "15% of 240") needs no web.
+  if (/^[\d\s%+\-*/x×÷=().,]+$/i.test(q.replace(/^what is/i, ""))) {
+    return false;
+  }
+  return true;
+}
+
+async function fetchLiveResults(question: string): Promise<LiveResult[]> {
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 6000);
+    const res = await fetch(
+      SEARCH_ENDPOINT + "?q=" + encodeURIComponent(question),
+      { signal: ctrl.signal },
+    );
+    clearTimeout(timer);
+    if (!res.ok) return [];
+    const data = (await res.json()) as { results?: LiveResult[] };
+    return Array.isArray(data.results) ? data.results.slice(0, 5) : [];
+  } catch {
+    return [];
+  }
+}
+
+function withLiveContext(question: string, results: LiveResult[]): string {
+  if (results.length === 0) return question;
+  const lines = results
+    .map(
+      (r, i) =>
+        `${i + 1}. ${r.title} — ${r.snippet} (source: ${r.url})`,
+    )
+    .join("\n");
+  return (
+    question +
+    "\n\nLIVE WEB RESULTS — you fetched these pages just now, before " +
+    "answering. For anything current or factual, answer from these " +
+    "results, not from memory:\n" +
+    lines
+  );
 }
 
 export interface AskCallbacks {
@@ -257,6 +321,17 @@ export async function askPB(
     );
   }
 
+  // PB searches first, answers from what he finds: fetch live results
+  // (fail-open) and fold them into the prompt for whichever lane
+  // serves. The fetched pages become the answer's shown sources.
+  const liveResults = needsLiveSearch(question)
+    ? await fetchLiveResults(question)
+    : [];
+  const prompt = withLiveContext(question, liveResults);
+  const fetchedSources: SourceLink[] = liveResults
+    .slice(0, 3)
+    .map((r) => ({ title: r.title, uri: r.url }));
+
   // Pre-call availability: drives the "checking on-device…" UI and is the
   // honest fallback signal if a response ever arrives without a source.
   const availability = await checkNanoAvailability();
@@ -264,18 +339,16 @@ export async function askPB(
   // Lane routing:
   // - Nano ready on this device → the hybrid model (on-device serves,
   //   private and offline-capable — the point of the hybrid build).
-  // - Nano not ready → the cloud serves either way, so use the grounded
-  //   search model and let PB look things up live. If the search request
-  //   ever fails before a single word streams, fall back to the hybrid
-  //   model — an answer from knowledge beats no answer at all. A failure
-  //   after text has streamed is surfaced as-is.
+  // - Nano not ready → the plain cloud model. If its request ever fails
+  //   before a single word streams, fall back to the hybrid model — an
+  //   answer beats no answer. A failure after text has streamed is
+  //   surfaced as-is.
+  const finish = (result: AskResult): AskResult =>
+    fetchedSources.length > 0 ? { ...result, sources: fetchedSources } : result;
+
   if (availability === "available") {
-    return await consume(
-      getHybridModel(),
-      question,
-      callbacks,
-      availability,
-      true,
+    return finish(
+      await consume(getHybridModel(), prompt, callbacks, availability, true),
     );
   }
   let emitted = false;
@@ -287,15 +360,13 @@ export async function askPB(
     },
   };
   try {
-    return await consume(getSearchModel(), question, tracking, availability, false);
+    return finish(
+      await consume(getCloudModel(), prompt, tracking, availability, false),
+    );
   } catch (err) {
     if (emitted) throw err;
-    return await consume(
-      getHybridModel(),
-      question,
-      callbacks,
-      availability,
-      true,
+    return finish(
+      await consume(getHybridModel(), prompt, callbacks, availability, true),
     );
   }
 }
