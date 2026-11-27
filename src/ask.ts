@@ -30,7 +30,7 @@ import { firebaseApp, firebaseConfigured } from "./firebase";
 import { PB_SYSTEM_CONTEXT } from "./facts";
 
 /** Cloud fallback model — the Firebase AI Logic default for SDK v13. */
-const CLOUD_MODEL = "gemini-3.8-flash";
+const CLOUD_MODEL = "gemini-3.5-flash";
 
 export type Lane = "on-device" | "cloud";
 
